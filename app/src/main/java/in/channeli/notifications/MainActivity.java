@@ -13,6 +13,7 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.widget.AbsListView;
 import android.widget.ListView;
 
 import org.apache.http.client.HttpClient;
@@ -37,7 +38,7 @@ public class MainActivity extends ActionBarActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
+        Log.e("log_tag","started main activity");
         final SharedPreferences settings = getSharedPreferences(MainActivity.PREFS_NAME,0);
         SharedPreferences.Editor editor = settings.edit();
 
@@ -46,7 +47,7 @@ public class MainActivity extends ActionBarActivity {
         httpGet.setHeader("Content-Type", "application/x-www-form-urlencoded");
         httpGet.setHeader("Cookie","CHANNELI_SESSID="+settings.getString("CHANNELI_SESSID",""));
 
-        Parsing parsing = new Parsing();
+        final Parsing parsing = new Parsing();
         try {
             String result = new ConnectTaskHttpGet().execute(httpGet).get();
             //Log.e("result",result);
@@ -59,9 +60,31 @@ public class MainActivity extends ActionBarActivity {
         } catch (ExecutionException e) {
             e.printStackTrace();
         }
-        ListView listView = (ListView) findViewById(R.id.listView);
-        listView.setAdapter(new ListViewAdapter(this, R.layout.list_node, notifications));
+        final ListView listView = (ListView) findViewById(R.id.listView);
+        final ListViewAdapter listViewAdapter = new ListViewAdapter(this, R.layout.list_node, notifications);
+        listView.setAdapter(listViewAdapter);
+        listView.setOnScrollListener(new ListViewScrollListener(2) {
+            @Override
+            public void loadMore(int page, int totalItemsCount) {
+                String result = null;
+                try {
+                     HttpGet httpPost = new HttpGet(MainActivity.UrlofNotification +
+                            "fetch?action=next&id="+notifications.get(notifications.size()-1).id+"number=20");
+                    httpPost.setHeader("Cookie","csrftoken="+settings.getString("csrftoken",""));
+                    httpPost.setHeader("Content-Type", "application/x-www-form-urlencoded");
+                    httpPost.setHeader("Cookie","CHANNELI_SESSID="+settings.getString("CHANNELI_SESSID",""));
+                    result = new ConnectTaskHttpGet().execute(httpPost).get();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                } catch (ExecutionException e) {
+                    e.printStackTrace();
+                }
 
+                notifications.addAll(parsing.parseNotifications(result));
+                listViewAdapter.notifyDataSetChanged();
+            }
+        });
+       /* The code below is for running intent service
         DownloadResultReceiver resultReceiver = new DownloadResultReceiver(new Handler());
         resultReceiver.setReceiver(new DownloadResultReceiver.Receiver() {
             @Override
@@ -95,7 +118,45 @@ public class MainActivity extends ActionBarActivity {
         intent.putExtra("receiver", resultReceiver);
         intent.putExtra("url", UrlofNotification+"fetch?action=first&id=&number=20");
         startService(intent);
+*/
+    }
+    private abstract class ListViewScrollListener implements ListView.OnScrollListener{
 
+        private int bufferItemCount = 2;
+        private int currentPage = 0;
+        private int itemCount = 0;
+        private boolean isLoading = true;
+
+        public ListViewScrollListener(int bufferItemCount){
+            this.bufferItemCount = bufferItemCount;
+        }
+
+        public abstract void loadMore(int page, int totalItemsCount);
+
+        @Override
+        public void onScrollStateChanged(AbsListView view, int scrollState) {
+
+        }
+
+        @Override
+        public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+            if (totalItemCount < itemCount) {
+                this.itemCount = totalItemCount;
+                if (totalItemCount == 0) {
+                    this.isLoading = true; }
+            }
+
+            if (isLoading && (totalItemCount > itemCount)) {
+                isLoading = false;
+                itemCount = totalItemCount;
+                currentPage++;
+            }
+
+            if (!isLoading && (totalItemCount - visibleItemCount)<=(firstVisibleItem + bufferItemCount)) {
+                loadMore(currentPage + 1, totalItemCount);
+                isLoading = true;
+            }
+        }
     }
 
 
